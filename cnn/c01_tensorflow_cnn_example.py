@@ -175,6 +175,7 @@ class MNIST(object):
         return tf.nn.conv2d(input_, convolution_kernel, strides=[1, 1, 1, 1], padding='SAME')
 
     def a(self):
+        pass
 
 
 
