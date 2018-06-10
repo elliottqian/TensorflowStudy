@@ -2,41 +2,206 @@
 
 from tensorflow.examples.tutorials.mnist import input_data
 import tensorflow as tf
+import numpy as np
 
 
-class SimpleCnn(object):
+def simple_cnn_model(features, labels, mode):
+    input_layer = tf.reshape(features["X"], [-1, 28, 28, 1])
+    convolution_layer_1 = build_convolution_layer(inputs=input_layer,
+                                                  filter_num=32,
+                                                  convolution_filter_size=[5, 5],
+                                                  convolution_stride=[2, 2],
+                                                  pooling_size=[2, 2],
+                                                  pooling_stride=[2, 2])
+    convolution_layer_2 = build_convolution_layer(inputs=convolution_layer_1,
+                                                  filter_num=64,
+                                                  convolution_filter_size=[5, 5],
+                                                  convolution_stride=[2, 2],
+                                                  pooling_size=[2, 2],
+                                                  pooling_stride=[2, 2])
+    dense_layer_1 = tf.layers.flatten(convolution_layer_2)
+    dense_layer_2 = build_dense_layer(dense_layer_1, [2014, 10], mode)
 
-    def __init__(self):
-        self.X = None
-        self.y = None
-        self.filter_one = None
-        pass
+    print(dense_layer_2)
 
-    def build_net(self):
+    predictions = {
+        # Generate predictions (for PREDICT and EVAL mode)
+        "classes": tf.argmax(input=dense_layer_2, axis=1),
+        # Add `softmax_tensor` to the graph. It is used for PREDICT and by the
+        "probabilities": tf.nn.softmax(dense_layer_2, name="softmax_tensor")
+    }
 
-        pass
+    if mode == tf.estimator.ModeKeys.PREDICT:
+        return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)
 
-    def build_varible(self):
-        with tf.variable_scope("input_data"):
-            self.X = tf.placeholder(dtype=tf.float32, shape=[None, 784])
-            self.y = tf.placeholder(dtype=tf.float32, shape=[None, 10])
+    loss = tf.losses.softmax_cross_entropy(onehot_labels=labels, logits=dense_layer_2)
+    if mode == tf.estimator.ModeKeys.TRAIN:
+        optimizer = tf.train.GradientDescentOptimizer(learning_rate=0.01)
+        train_op = optimizer.minimize(loss=loss, global_step=tf.train.get_global_step())
+        return tf.estimator.EstimatorSpec(mode=mode, loss=loss, train_op=train_op)
 
-        with tf.variable_scope("parameter"):
-            self.filter_one = tf.Variable(initial_value=tf.random_uniform([3, 3, 1]))
-            pass
+    if mode == tf.estimator.ModeKeys.EVAL:
+        eval_metric_ops = {
+            "accuracy": tf.metrics.accuracy(labels=tf.argmax(labels, axis=1), predictions=predictions["classes"])
+        }
+        return tf.estimator.EstimatorSpec(mode=mode, loss=loss, eval_metric_ops=eval_metric_ops)
+    pass
 
-    def build_cov(self):
-        with tf.variable_scope("cov"):
-            tf.nn.conv2d(self.X, self.filter_one, strides=[1, 1, 1, 1], padding='SAME')
 
-    def build_loss(self):
-        pass
+def build_convolution_layer(inputs,
+                            filter_num,
+                            convolution_filter_size,
+                            convolution_stride,
+                            pooling_size,
+                            pooling_stride):
+    layer_1 = tf.layers.conv2d(inputs=inputs,
+                               filters=filter_num,
+                               kernel_size=convolution_filter_size,
+                               strides=convolution_stride,
+                               padding="same",
+                               activation=tf.nn.relu)
+    layer_2 = tf.layers.max_pooling2d(inputs=layer_1,
+                                      pool_size=pooling_size,
+                                      strides=pooling_stride)
+    return layer_2
 
-    def train(self):
-        pass
 
-    def save_model(self):
-        pass
+def build_dense_layer(inputs, unit_list: list, mode):
+    layer_temp = inputs
+    unit_list_length = len(unit_list)
+    for index, unit_num in enumerate(unit_list):
+        if index != unit_list_length - 1:
+            layer_temp = tf.layers.dense(inputs=layer_temp, units=unit_num, activation=tf.nn.relu)
+            layer_temp = tf.layers.dropout(inputs=layer_temp,
+                                           rate=0.4,
+                                           training=(mode == tf.estimator.ModeKeys.TRAIN))
+        else:
+            layer_temp = tf.layers.dense(inputs=layer_temp, units=unit_num)
+    return layer_temp
+
+
+if __name__ == "__main__":
+    print("build_net")
+
+    mnist = input_data.read_data_sets("../cnn/MNIST_data/", one_hot=True)
+    train_data = mnist.train.images  # Returns np.array
+    print(type(train_data))
+    train_labels = np.asarray(mnist.train.labels, dtype=np.int32)
+    print(type(train_labels))
+    print(train_labels[0:2])
+    eval_data = mnist.test.images  # Returns np.array
+    eval_labels = np.asarray(mnist.test.labels, dtype=np.int32)
+
+    mnist_classifier = tf.estimator.Estimator(model_fn=simple_cnn_model, model_dir="./tmp/mnist_convnet_model")
+
+    tensors_to_log = {"probabilities": "softmax_tensor"}
+    logging_hook = tf.train.LoggingTensorHook(tensors=tensors_to_log, every_n_iter=2)
+
+    with tf.device("/cpu:0"):
+        train_input_fn = tf.estimator.inputs.numpy_input_fn(
+            x={"X": train_data},
+            y=train_labels,
+            batch_size=100,
+            num_epochs=None,
+            shuffle=True)
+        mnist_classifier.train(
+            input_fn=train_input_fn,
+            steps=2000,
+            hooks=[logging_hook])
+        eval_input_fn = tf.estimator.inputs.numpy_input_fn(
+            x={"X": eval_data},
+            y=eval_labels,
+            num_epochs=1,
+            shuffle=False)
+        eval_results = mnist_classifier.evaluate(input_fn=eval_input_fn)
+        print(eval_results)
+    pass
+
+# class SimpleCnn(object):
+#
+#     def __init__(self):
+#         self.X = None
+#         self.y = None
+#         self.filter_one = None
+#         pass
+#
+#     def build_net(self):
+#
+#         pass
+#
+#     def build_variable(self):
+#         with tf.variable_scope("input_data"):
+#             self.X = tf.placeholder(dtype=tf.float32, shape=[None, 784])
+#             self.y = tf.placeholder(dtype=tf.float32, shape=[None, 10])
+#
+#         with tf.variable_scope("parameter"):
+#             W_conv1 = SimpleCnn.weight_variable([5, 5, 1, 32])
+#             self.filter_one = tf.Variable(initial_value=tf.random_uniform([3, 3, 1]))
+#             pass
+#
+#     def build_cov(self):
+#         with tf.variable_scope("cov"):
+#             tf.nn.conv2d(self.X, self.filter_one, strides=[1, 1, 1, 1], padding='SAME')
+#
+#     @staticmethod
+#     def weight_variable(shape):
+#         initial = tf.truncated_normal(shape, stddev=0.1)
+#         return tf.Variable(initial)
+#
+#     @staticmethod
+#     def bias_variable(shape):
+#         initial = tf.constant(0.1, shape=shape)
+#         return tf.Variable(initial)
+#
+#     @staticmethod
+#     def convolution_and_pooling_2d(inputs,
+#                                    filters_num,
+#                                    kernel_size,
+#                                    convolution_strides,
+#                                    pool_size,
+#                                    pool_strides):
+#         """
+#         filter:　是一个４维张量，其type必须和输入一样，
+#         """
+#         temp_layer = tf.layers.conv2d(inputs,
+#                                       filters=filters_num,
+#                                       kernel_size=kernel_size,
+#                                       strides=convolution_strides,
+#                                       activation=tf.nn.relu)
+#         out_layer = tf.layers.max_pooling2d(temp_layer,
+#                                             pool_size=pool_size,
+#                                             strides=pool_strides)
+#
+#         tf.nn.softmax_cross_entropy_with_logits
+#         tf.losses.softmax_cross_entropy
+#         tf.reduce_sum
+#         tf.train.GradientDescentOptimizer
+#         tf.argmax
+#         tf.estimator.ModeKeys.TRAIN
+#         classifial = tf.estimator.DNNClassifier()
+#         classifial.train()
+#         tf.feature_column.categorical_column_with_hash_bucket
+#         tf.estimator.Estimator
+#         tf.data.TextLineDataset
+#         tf.map
+#         tf.estimator.DNNLinearCombinedClassifier().train()
+#         estimator.train(input_fn=my_training_set, steps=2000)
+#         return out_layer
+#
+#     @staticmethod
+#     def max_pool(inputs, pool_size):
+#         strides = None
+#         return tf.layers.max_pooling2d(inputs, pool_size, strides, padding='SAME')
+#
+#     def build_loss(self):
+#         pass
+#
+#     def train(self):
+#         pass
+#
+#     def save_model(self):
+#
+#         pass
 
 
 # mnist = input_data.read_data_sets("MNIST_data/", one_hot=True)
