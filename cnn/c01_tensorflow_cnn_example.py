@@ -20,7 +20,7 @@ def simple_cnn_model(features, labels, mode):
                                                   pooling_size=[2, 2],
                                                   pooling_stride=[2, 2])
     dense_layer_1 = tf.layers.flatten(convolution_layer_2)
-    dense_layer_2 = build_dense_layer(dense_layer_1, [2014, 10], mode)
+    dense_layer_2 = build_dense_layer(dense_layer_1, [2016, 500, 10], mode)
 
     print(dense_layer_2)
 
@@ -29,6 +29,10 @@ def simple_cnn_model(features, labels, mode):
         "classes": tf.argmax(input=dense_layer_2, axis=1),
         # Add `softmax_tensor` to the graph. It is used for PREDICT and by the
         "probabilities": tf.nn.softmax(dense_layer_2, name="softmax_tensor")
+    }
+
+    eval_metric_ops = {
+        "accuracy": tf.metrics.accuracy(labels=tf.argmax(labels, axis=1), predictions=predictions["classes"])
     }
 
     if mode == tf.estimator.ModeKeys.PREDICT:
@@ -41,10 +45,8 @@ def simple_cnn_model(features, labels, mode):
         return tf.estimator.EstimatorSpec(mode=mode, loss=loss, train_op=train_op)
 
     if mode == tf.estimator.ModeKeys.EVAL:
-        eval_metric_ops = {
-            "accuracy": tf.metrics.accuracy(labels=tf.argmax(labels, axis=1), predictions=predictions["classes"])
-        }
-        return tf.estimator.EstimatorSpec(mode=mode, loss=loss, eval_metric_ops=eval_metric_ops)
+        return tf.estimator.EstimatorSpec(mode=mode, loss=loss,
+                                          eval_metric_ops=eval_metric_ops)
     pass
 
 
@@ -73,7 +75,7 @@ def build_dense_layer(inputs, unit_list: list, mode):
         if index != unit_list_length - 1:
             layer_temp = tf.layers.dense(inputs=layer_temp, units=unit_num, activation=tf.nn.relu)
             layer_temp = tf.layers.dropout(inputs=layer_temp,
-                                           rate=0.4,
+                                           rate=0.5,
                                            training=(mode == tf.estimator.ModeKeys.TRAIN))
         else:
             layer_temp = tf.layers.dense(inputs=layer_temp, units=unit_num)
@@ -92,7 +94,7 @@ if __name__ == "__main__":
     eval_data = mnist.test.images  # Returns np.array
     eval_labels = np.asarray(mnist.test.labels, dtype=np.int32)
 
-    mnist_classifier = tf.estimator.Estimator(model_fn=simple_cnn_model, model_dir="./tmp/mnist_convnet_model")
+    mnist_classifier = tf.estimator.Estimator(model_fn=simple_cnn_model, model_dir="./_3layer/mnist_convnet_model")
 
     tensors_to_log = {"probabilities": "softmax_tensor"}
     logging_hook = tf.train.LoggingTensorHook(tensors=tensors_to_log, every_n_iter=2)
@@ -104,17 +106,27 @@ if __name__ == "__main__":
             batch_size=100,
             num_epochs=None,
             shuffle=True)
+
         mnist_classifier.train(
             input_fn=train_input_fn,
-            steps=2000,
+            steps=20000,
             hooks=[logging_hook])
-        eval_input_fn = tf.estimator.inputs.numpy_input_fn(
+
+        eval_input_train_fn = tf.estimator.inputs.numpy_input_fn(
+            x={"X": train_data},
+            y=train_labels,
+            num_epochs=1,
+            shuffle=False)
+        eval_input_test_fn = tf.estimator.inputs.numpy_input_fn(
             x={"X": eval_data},
             y=eval_labels,
             num_epochs=1,
             shuffle=False)
-        eval_results = mnist_classifier.evaluate(input_fn=eval_input_fn)
-        print(eval_results)
+
+        eval_results_train = mnist_classifier.evaluate(input_fn=eval_input_train_fn)
+        eval_results_test = mnist_classifier.evaluate(input_fn=eval_input_test_fn)
+        print(eval_results_train)
+        print(eval_results_test)
     pass
 
 # class SimpleCnn(object):
