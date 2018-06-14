@@ -4,6 +4,8 @@ from tensorflow.examples.tutorials.mnist import input_data
 import tensorflow as tf
 import numpy as np
 
+tf.logging.set_verbosity(tf.logging.INFO)
+
 
 def simple_cnn_model(features, labels, mode):
     input_layer = tf.reshape(features["X"], [-1, 28, 28, 1])
@@ -32,17 +34,23 @@ def simple_cnn_model(features, labels, mode):
     }
 
     eval_metric_ops = {
-        "accuracy": tf.metrics.accuracy(labels=tf.argmax(labels, axis=1), predictions=predictions["classes"])
+        "accuracy": tf.metrics.accuracy(labels=tf.argmax(labels, axis=1),
+                                        predictions=predictions["classes"],
+                                        name="accuracy")
     }
 
     if mode == tf.estimator.ModeKeys.PREDICT:
-        return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)
+        classification_output = tf.estimator.export.ClassificationOutput(scores=predictions["probabilities"], classes=predictions["classes"])
+        export_outputs = {"classification_output", classification_output}
+        return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions, export_outputs=export_outputs)
 
     loss = tf.losses.softmax_cross_entropy(onehot_labels=labels, logits=dense_layer_2)
+    logging_hook = tf.train.LoggingTensorHook({"loss": loss}, every_n_iter=100)
     if mode == tf.estimator.ModeKeys.TRAIN:
         optimizer = tf.train.GradientDescentOptimizer(learning_rate=0.01)
         train_op = optimizer.minimize(loss=loss, global_step=tf.train.get_global_step())
-        return tf.estimator.EstimatorSpec(mode=mode, loss=loss, train_op=train_op)
+        tf.summary.scalar('my_loss', loss)
+        return tf.estimator.EstimatorSpec(mode=mode, loss=loss, train_op=train_op, training_hooks=[logging_hook])
 
     if mode == tf.estimator.ModeKeys.EVAL:
         return tf.estimator.EstimatorSpec(mode=mode, loss=loss,
@@ -94,40 +102,46 @@ if __name__ == "__main__":
     eval_data = mnist.test.images  # Returns np.array
     eval_labels = np.asarray(mnist.test.labels, dtype=np.int32)
 
-    mnist_classifier = tf.estimator.Estimator(model_fn=simple_cnn_model, model_dir="./_3layer/mnist_convnet_model")
+    # 设置 GPU 按需增长
 
-    tensors_to_log = {"probabilities": "softmax_tensor"}
-    logging_hook = tf.train.LoggingTensorHook(tensors=tensors_to_log, every_n_iter=2)
+    session_config = tf.ConfigProto(log_device_placement=False)
+    session_config.gpu_options.allow_growth = True
+    run_config = tf.estimator.RunConfig().replace(session_config=session_config)
+    mnist_classifier = tf.estimator.Estimator(model_fn=simple_cnn_model,
+                                              model_dir="./_3layer/mnist_convnet_model2",
+                                              config=run_config)
+    #mnist_classifier.export_savedmodel()
+    #tf.estimator.export.build_raw_serving_input_receiver_fn()
+    #features = tf.parse_example
+    #tf.estimator.export.ServingInputReceiver
+    # tf.estimator.export.PredictOutput
+    # tf.estimator.export.ClassificationOutput
+    # tf.estimator.export.RegressionOutput
+    # tensors_to_log = ["softmax_tensor", "eval_metric_ops"]
+    # logging_hook = tf.train.LoggingTensorHook(tensors=tensors_to_log, every_n_iter=20)
 
-    with tf.device("/cpu:0"):
-        train_input_fn = tf.estimator.inputs.numpy_input_fn(
-            x={"X": train_data},
-            y=train_labels,
-            batch_size=100,
-            num_epochs=None,
-            shuffle=True)
-
-        mnist_classifier.train(
-            input_fn=train_input_fn,
-            steps=20000,
-            hooks=[logging_hook])
-
-        eval_input_train_fn = tf.estimator.inputs.numpy_input_fn(
-            x={"X": train_data},
-            y=train_labels,
-            num_epochs=1,
-            shuffle=False)
-        eval_input_test_fn = tf.estimator.inputs.numpy_input_fn(
-            x={"X": eval_data},
-            y=eval_labels,
-            num_epochs=1,
-            shuffle=False)
-
-        eval_results_train = mnist_classifier.evaluate(input_fn=eval_input_train_fn)
-        eval_results_test = mnist_classifier.evaluate(input_fn=eval_input_test_fn)
-        print(eval_results_train)
-        print(eval_results_test)
+    train_input_fn = tf.estimator.inputs.numpy_input_fn(x={"X": train_data},
+                                                        y=train_labels,
+                                                        batch_size=100,
+                                                        num_epochs=None,
+                                                        shuffle=True)
+    mnist_classifier.train(input_fn=train_input_fn,
+                           steps=2000,
+                           hooks=[])
+    eval_input_train_fn = tf.estimator.inputs.numpy_input_fn(x={"X": train_data},
+                                                             y=train_labels,
+                                                             num_epochs=1,
+                                                             shuffle=False)
+    eval_input_test_fn = tf.estimator.inputs.numpy_input_fn(x={"X": eval_data},
+                                                            y=eval_labels,
+                                                            num_epochs=1,
+                                                            shuffle=False)
+    eval_results_train = mnist_classifier.evaluate(input_fn=eval_input_train_fn)
+    eval_results_test = mnist_classifier.evaluate(input_fn=eval_input_test_fn)
+    print(eval_results_train)
+    print(eval_results_test)
     pass
+
 
 # class SimpleCnn(object):
 #
